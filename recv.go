@@ -24,7 +24,6 @@ import (
 	"log"
 	"os"
 	"os/signal"
-	"runtime/pprof"
 	"strings"
 	"time"
 
@@ -32,13 +31,13 @@ import (
 	"github.com/bemasher/rtlamr/parse"
 	"github.com/bemasher/rtlamr/r900"
 	"github.com/bemasher/rtlamr/scm"
-	"github.com/bemasher/rtltcp"
+	"github.com/jpoirier/gortlsdr"
 )
 
 var rcvr Receiver
 
 type Receiver struct {
-	rtltcp.SDR
+	*rtlsdr.Context
 	p  parse.Parser
 	fc parse.FilterChain
 }
@@ -59,29 +58,14 @@ func (rcvr *Receiver) NewReceiver() {
 		rcvr.p.Log()
 	}
 
-	// Connect to rtl_tcp server.
-	if err := rcvr.Connect(nil); err != nil {
+	// Open rtl-sdr dongle.
+	var err error
+	if rcvr.Context, err = rtlsdr.Open(0); err != nil {
 		log.Fatal(err)
 	}
 
-	rcvr.HandleFlags()
-
-	// Tell the user how many gain settings were reported by rtl_tcp.
-	if !*quiet {
-		log.Println("GainCount:", rcvr.SDR.Info.GainCount)
-	}
-
-	centerfreqFlagSet := false
-	sampleRateFlagSet := false
-	gainFlagSet := false
 	flag.Visit(func(f *flag.Flag) {
 		switch f.Name {
-		case "centerfreq":
-			centerfreqFlagSet = true
-		case "samplerate":
-			sampleRateFlagSet = true
-		case "gainbyindex", "tunergainmode", "tunergain", "agcmode":
-			gainFlagSet = true
 		case "unique":
 			rcvr.fc.Add(NewUniqueFilter())
 		case "filterid":
@@ -91,19 +75,20 @@ func (rcvr *Receiver) NewReceiver() {
 		}
 	})
 
-	// Set some parameters for listening.
-	if centerfreqFlagSet {
-		rcvr.SetCenterFreq(uint32(rcvr.Flags.CenterFreq))
-	} else {
-		rcvr.SetCenterFreq(rcvr.p.Cfg().CenterFreq)
+	if err := rcvr.SetCenterFreq(int(rcvr.p.Cfg().CenterFreq)); err != nil {
+		log.Fatal(err)
+	}
+	if err := rcvr.SetSampleRate(int(rcvr.p.Cfg().SampleRate)); err != nil {
+		log.Fatal(err)
+	}
+	if err := rcvr.SetTunerGainMode(false); err != nil {
+		log.Fatal(err)
 	}
 
-	if !sampleRateFlagSet {
-		rcvr.SetSampleRate(uint32(rcvr.p.Cfg().SampleRate))
-	}
-	if !gainFlagSet {
-		rcvr.SetGainMode(true)
-	}
+	log.Println(rcvr.GetCenterFreq())
+	log.Println(rcvr.GetSampleRate())
+
+	rcvr.ResetBuffer()
 
 	return
 }
@@ -120,17 +105,22 @@ func (rcvr *Receiver) Run() {
 	}
 
 	in, out := io.Pipe()
+	userCtx := rtlsdr.UserCtx(out)
 
-	go func() {
-		tcpBlock := make([]byte, 16384)
-		for {
-			n, err := rcvr.Read(tcpBlock)
-			if err != nil {
-				return
-			}
-			out.Write(tcpBlock[:n])
-		}
+	defer func() {
+		in.Close()
+		out.Close()
 	}()
+
+	ctx := &rtlsdr.CustUserCtx{
+		func(buf []byte, ctx *rtlsdr.UserCtx) {
+			out := (*ctx).(*io.PipeWriter)
+			out.Write(buf)
+		},
+		&userCtx,
+	}
+
+	go rcvr.ReadAsync2(ctx, 1, 16384)
 
 	block := make([]byte, rcvr.p.Cfg().BlockSize2)
 
@@ -204,10 +194,7 @@ func init() {
 	log.SetFlags(log.Lshortfile | log.Lmicroseconds)
 }
 
-var cpuprofile = flag.String("cpuprofile", "", "write cpu profile to this file")
-
 func main() {
-	rcvr.RegisterFlags()
 	RegisterFlags()
 
 	flag.Parse()
@@ -215,18 +202,19 @@ func main() {
 
 	rcvr.NewReceiver()
 
-	defer logFile.Close()
-	defer sampleFile.Close()
-	defer rcvr.Close()
+	defer func() {
+		logFile.Close()
+		sampleFile.Close()
 
-	if *cpuprofile != "" {
-		f, err := os.Create(*cpuprofile)
+		fmt.Println("Cancelling...")
+		err := rcvr.CancelAsync()
 		if err != nil {
 			log.Fatal(err)
 		}
-		pprof.StartCPUProfile(f)
-		defer pprof.StopCPUProfile()
-	}
+		fmt.Println("Closing...")
+		rcvr.Close()
+		os.Exit(0)
+	}()
 
 	rcvr.Run()
 }
