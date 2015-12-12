@@ -27,12 +27,12 @@ import (
 )
 
 func NewPacketConfig(symbolLength int) (cfg decode.PacketConfig) {
-	cfg.CenterFreq = 912600155
-	cfg.DataRate = 32768
+	cfg.CenterFreq = 169418750
+	cfg.DataRate = 4800
 	cfg.SymbolLength = symbolLength
-	cfg.PreambleSymbols = 21
-	cfg.PacketSymbols = 96
-	cfg.Preamble = "111110010101001100000"
+	cfg.PreambleSymbols = 2
+	cfg.PacketSymbols = 53
+	cfg.Preamble = "0101010101010101"
 
 	return
 }
