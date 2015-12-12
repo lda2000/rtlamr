@@ -30,9 +30,10 @@ func NewPacketConfig(symbolLength int) (cfg decode.PacketConfig) {
 	cfg.CenterFreq = 169418750
 	cfg.DataRate = 4800
 	cfg.SymbolLength = symbolLength
-	cfg.PreambleSymbols = 2
+	cfg.PreambleSymbols = 8
 	cfg.PacketSymbols = 53
-	cfg.Preamble = "0101010101010101"
+	cfg.Preamble = "01010101010101011111011001110010"
+	// 8x 01 + F672
 
 	return
 }
