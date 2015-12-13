@@ -22,7 +22,7 @@ ENV PATH $PATH:$GOPATH/bin
 
 # Build, test and install RTLAMR
 WORKDIR /go/src/
-RUN go get -v github.com/bemasher/rtlamr
+RUN go get -v github.com/lda2000/rtlamr
 RUN go test -v ./...
 
 CMD ["rtlamr"]
